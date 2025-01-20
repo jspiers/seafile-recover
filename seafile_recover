@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+
+# Error on unbound variable -u
+# Break when any command has non-zero exit code -e
+set -ue
+
+# Break when piped command has non-zero exit code
+set -o pipefail
+
+# Set some variables
+SEAFILE_RECOVERY_STORAGE=${SEAFILE_RECOVERY_STORAGE:-/ludivine/seafile/data/seafile/seafile-data/storage}
+SEAFILE_RECOVERY_DEST=${SEAFILE_RECOVERY_DEST:-/ludivine/seafile-backup}
+#SEAFILE_RECOVERY_ACCESS_KEY=${SEAFILE_RECOVERY_ACCESS_KEY:-"qOFD1"}
+#SEAFILE_RECOVERY_SECRET_KEY=${SEAFILE_RECOVERY_SECRET_KEY:-"mZmFqrO"}
+#SEAFILE_RECOVERY_ENDPOINT=${SEAFILE_RECOVERY_ENDPOINT:-"l4u7.ca.idrivee2-30.com"}
+#SEAFILE_RECOVERY_REGION=region
+#SEAFILE_RECOVERY_BUCKET=${SEAFILE_RECOVERY_BUCKET:-"seafile-backup"}
+
+# Install seafile_recovery tool
+command=${GOPATH:-${HOME}/go}/bin/seafile_recovery
+if [ ! -x ${command} ]; then
+  go install git.deuxfleurs.fr/quentin/seafile_recovery@latest
+fi
+# Make sure it runs
+${command} --help &>/dev/null
+
+# Check storage
+if [ ! -d ${SEAFILE_RECOVERY_STORAGE:?} ]; then
+  echo "No such directory ${SEAFILE_RECOVERY_STORAGE}"
+  exit 1
+fi
+
+process_repo() {
+  repo=$1
+  printf "Processing repo ${repo}\n"
+
+  # Construct and execute head command
+  head=$(${command} --storage=${SEAFILE_RECOVERY_STORAGE} head ${repo} 2>&1 || printf "failed")
+  printf "head:\n$head\n"
+
+  # Check for failure
+  if [[ "$head" =~ failed$ ]]; then
+    printf "failed to get repo info for $repo\n"
+    return 1
+  fi
+
+  # Extract RootId
+  [[ ${head} =~ RootId:[[:blank:]]*([-[:xdigit:]]+) ]]
+  #printf "\nbash rematch:\n${BASH_REMATCH}\n"
+  rootId=${BASH_REMATCH[1]}
+  printf "root id is $rootId\n"
+
+  # Extract RepoName
+  [[ ${head} =~ RepoName:[[:blank:]]*([-_[:alnum:][:blank:]]+) ]]
+  printf "\nbash rematch:\n${BASH_REMATCH}\n"
+  repoName=${BASH_REMATCH[1]}
+
+  # Display info
+  printf "Repo:\t\t$repo\nRootId:\t\t$rootId\nRepoName:\t$repoName\n"
+
+  # Construct and display list command
+  printf "${command} --storage=${SEAFILE_RECOVERY_STORAGE} ls ${repo} --dir=${rootId}\n"
+
+  # Get user approval (y or Y)
+  read -p "List? " -n 1 -r && printf "\n"
+  if [[ $REPLY =~ ^[Yy]$ ]]; then
+    # Execute ls command
+    list=$(${command} --storage=${SEAFILE_RECOVERY_STORAGE} ls ${repo} --dir=${rootId} || printf "failed")
+    printf "list:\n$list\n"
+    if [[ "$list" =~ failed$ ]]; then
+      return 2
+    fi
+
+    # Display copy command and ask for approval
+    printf "${command} --storage=${SEAFILE_RECOVERY_STORAGE} cp ${repo} --dir=${rootId} \"${SEAFILE_RECOVERY_DEST:?}/$repoName\"\n"
+    read -p "Copy? " -n 1 -r && printf "\n"
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+      # Execute cp command
+      ${command} --storage=${SEAFILE_RECOVERY_STORAGE} cp ${repo} --dir=${rootId} "${SEAFILE_RECOVERY_DEST:?}/$repoName"
+    fi
+  fi
+
+  printf "\n"
+}
+
+# Iterate over all repos (under /fs subdirectory)
+for repo in $(ls -1 ${SEAFILE_RECOVERY_STORAGE:?}/fs); do
+  read -p "Process repo $repo?" -n 1 -r && printf "\n"
+  if [[ ! $REPLY =~ ^[Yy] ]]; then
+    continue
+  fi
+  process_repo $repo || printf "Failed to process $repo\n"
+done
