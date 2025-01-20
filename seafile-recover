@@ -65,12 +65,7 @@ process_repo() {
   read -p "List? " -n 1 -r && printf "\n"
   if [[ $REPLY =~ ^[Yy]$ ]]; then
     # Execute ls command
-    #list=$($lscommand 2>&1 || printf failed)
-    list=$("${lscommand[@]}" 2>&1 || printf failed)
-    printf "list:\n%s\n" "$list"
-    if [[ "$list" =~ failed$ ]]; then
-      return 2
-    fi
+    "${lscommand[@]}" || return 2
 
     # Display copy command and ask for approval
     cpcommand=("${command}" "--storage=${SEAFILE_RECOVERY_STORAGE}" cp "$repo" "--dir=$rootId" "${SEAFILE_RECOVERY_DEST:?}/$repoName")
@@ -78,7 +73,7 @@ process_repo() {
     read -p "Copy? " -n 1 -r && printf "\n"
     if [[ $REPLY =~ ^[Yy]$ ]]; then
       # Execute cp command
-      ("${cpcommand[@]}" 2>&1 || printf failed)
+      "${cpcommand[@]}" || return 3
     fi
   fi
 
