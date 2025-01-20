@@ -18,76 +18,79 @@ SEAFILE_RECOVERY_DEST=${SEAFILE_RECOVERY_DEST:-/ludivine/seafile-backup}
 
 # Install seafile_recovery tool
 command=${GOPATH:-${HOME}/go}/bin/seafile_recovery
-if [ ! -x ${command} ]; then
+if [ ! -x "${command}" ]; then
   go install git.deuxfleurs.fr/quentin/seafile_recovery@latest
 fi
 # Make sure it runs
 ${command} --help &>/dev/null
 
 # Check storage
-if [ ! -d ${SEAFILE_RECOVERY_STORAGE:?} ]; then
+if [ ! -d "${SEAFILE_RECOVERY_STORAGE:?}" ]; then
   echo "No such directory ${SEAFILE_RECOVERY_STORAGE}"
   exit 1
 fi
 
 process_repo() {
   repo=$1
-  printf "Processing repo ${repo}\n"
+  printf "Processing repo %s\n" "$repo"
 
   # Construct and execute head command
-  head=$(${command} --storage=${SEAFILE_RECOVERY_STORAGE} head ${repo} 2>&1 || printf "failed")
-  printf "head:\n$head\n"
+  head=$("${command}" "--storage=${SEAFILE_RECOVERY_STORAGE}" head "$repo" 2>&1 || printf failed)
+  printf "head:\n%s\n" "$head"
 
   # Check for failure
-  if [[ "$head" =~ failed$ ]]; then
-    printf "failed to get repo info for $repo\n"
+  if [[ $head =~ failed$ ]]; then
     return 1
   fi
 
   # Extract RootId
-  [[ ${head} =~ RootId:[[:blank:]]*([-[:xdigit:]]+) ]]
+  [[ $head =~ RootId:[[:blank:]]*([-[:xdigit:]]+) ]]
   #printf "\nbash rematch:\n${BASH_REMATCH}\n"
   rootId=${BASH_REMATCH[1]}
-  printf "root id is $rootId\n"
+  #printf "root id is $rootId\n"
 
   # Extract RepoName
-  [[ ${head} =~ RepoName:[[:blank:]]*([-_[:alnum:][:blank:]]+) ]]
-  printf "\nbash rematch:\n${BASH_REMATCH}\n"
+  [[ $head =~ RepoName:[[:blank:]]*([-_[:alnum:][:blank:]]+) ]]
+  #printf "\nbash rematch:\n${BASH_REMATCH}\n"
   repoName=${BASH_REMATCH[1]}
 
   # Display info
-  printf "Repo:\t\t$repo\nRootId:\t\t$rootId\nRepoName:\t$repoName\n"
+  printf "Repo:\t\t%s\nRootId:\t\t%s\nRepoName:\t%s\n" "$repo" "$rootId" "$repoName"
 
   # Construct and display list command
-  printf "${command} --storage=${SEAFILE_RECOVERY_STORAGE} ls ${repo} --dir=${rootId}\n"
+  lscommand=("${command}" "--storage=${SEAFILE_RECOVERY_STORAGE}" ls "$repo" "--dir=${rootId}")
+  printf "%s\n" "${lscommand[*]}"
 
   # Get user approval (y or Y)
   read -p "List? " -n 1 -r && printf "\n"
   if [[ $REPLY =~ ^[Yy]$ ]]; then
     # Execute ls command
-    list=$(${command} --storage=${SEAFILE_RECOVERY_STORAGE} ls ${repo} --dir=${rootId} || printf "failed")
-    printf "list:\n$list\n"
+    #list=$($lscommand 2>&1 || printf failed)
+    list=$("${lscommand[@]}" 2>&1 || printf failed)
+    printf "list:\n%s\n" "$list"
     if [[ "$list" =~ failed$ ]]; then
       return 2
     fi
 
     # Display copy command and ask for approval
-    printf "${command} --storage=${SEAFILE_RECOVERY_STORAGE} cp ${repo} --dir=${rootId} \"${SEAFILE_RECOVERY_DEST:?}/$repoName\"\n"
+    cpcommand=("${command}" "--storage=${SEAFILE_RECOVERY_STORAGE}" cp "$repo" "--dir=$rootId" "${SEAFILE_RECOVERY_DEST:?}/$repoName")
+    printf "%s\n" "${cpcommand[*]}"
     read -p "Copy? " -n 1 -r && printf "\n"
     if [[ $REPLY =~ ^[Yy]$ ]]; then
       # Execute cp command
-      ${command} --storage=${SEAFILE_RECOVERY_STORAGE} cp ${repo} --dir=${rootId} "${SEAFILE_RECOVERY_DEST:?}/$repoName"
+      ("${cpcommand[@]}" 2>&1 || printf failed)
     fi
   fi
 
   printf "\n"
 }
 
-# Iterate over all repos (under /fs subdirectory)
-for repo in $(ls -1 ${SEAFILE_RECOVERY_STORAGE:?}/fs); do
+# Iterate over all repos under /fs subdirectory
+for fullpath in "${SEAFILE_RECOVERY_STORAGE:?}"/fs/*; do
+  repo=$(basename "$fullpath")
   read -p "Process repo $repo?" -n 1 -r && printf "\n"
   if [[ ! $REPLY =~ ^[Yy] ]]; then
     continue
   fi
-  process_repo $repo || printf "Failed to process $repo\n"
+  process_repo "$repo" || printf "Failed to process %s\n" "$repo"
 done
